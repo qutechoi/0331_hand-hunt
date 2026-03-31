@@ -11,6 +11,7 @@
 - 45초 타임어택
 - 점수 집계
 - 모바일 브라우저 실행 가능
+- GitHub Pages 자동 배포 지원
 
 ## 실행
 
@@ -34,8 +35,24 @@ npm run preview
 4. 동물에 조준점이 닿으면 사냥 성공입니다.
 5. 45초 안에 최대한 많이 맞히면 됩니다.
 
+## GitHub Pages 자동 배포 설정
+
+이 저장소에는 GitHub Actions 기반 자동 배포 워크플로가 포함되어 있습니다.
+
+1. **Settings → Pages**
+2. **Source = GitHub Actions** 선택
+3. `main` 브랜치에 push 하면 자동 배포
+
+예상 주소:
+
+```text
+https://qutechoi.github.io/0331_hand-hunt/
+```
+
 ## 기술 스택
 
 - React
 - Vite
 - MediaPipe Tasks Vision
+- GitHub Actions
+- GitHub Pages

@@ -117,6 +117,20 @@
   font-size: clamp(2rem, 4vw, 3rem);
 }
 
+.animal-pts {
+  position: absolute;
+  top: -8px;
+  right: -8px;
+  font-size: 0.7rem !important;
+  font-weight: 800;
+  color: white;
+  background: linear-gradient(135deg, #ff6b4a, #ffb340);
+  padding: 2px 6px;
+  border-radius: 10px;
+  line-height: 1.2;
+  box-shadow: 0 2px 6px rgba(255, 100, 50, 0.4);
+}
+
 .crosshair {
   position: absolute;
   width: 56px;
@@ -309,6 +323,28 @@
   padding-left: 18px;
   color: #5e566e;
   line-height: 1.75;
+}
+
+.score-list {
+  list-style: none;
+  padding-left: 0 !important;
+}
+
+.score-list li {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 6px 0;
+  border-bottom: 1px solid rgba(108, 88, 160, 0.08);
+}
+
+.score-list li:last-child {
+  border-bottom: none;
+}
+
+.score-list strong {
+  color: #ff7a45;
+  font-size: 0.95rem;
 }
 
 .start-button {

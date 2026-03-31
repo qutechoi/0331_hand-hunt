@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { FilesetResolver, HandLandmarker } from '@mediapipe/tasks-vision'
 import './App.css'
 
@@ -6,61 +6,63 @@ const GAME_WIDTH = 960
 const GAME_HEIGHT = 540
 const GAME_DURATION = 45
 
-const animals = ['🦌', '🐗', '🦊', '🐇', '🦝']
+// 동물별 점수 — 작고 빠를수록 고득점
+const ANIMAL_SCORES = {
+  '🐇': { points: 10, label: '토끼' },
+  '🐗': { points: 20, label: '멧돼지' },
+  '🦝': { points: 30, label: '너구리' },
+  '🦊': { points: 40, label: '여우' },
+  '🦌': { points: 50, label: '사슴' },
+}
+
+const animalKeys = Object.keys(ANIMAL_SCORES)
 
 function randomAnimal() {
-  return animals[Math.floor(Math.random() * animals.length)]
+  return animalKeys[Math.floor(Math.random() * animalKeys.length)]
 }
 
 function spawnAnimal() {
-  const size = 56 + Math.random() * 42
+  const emoji = randomAnimal()
+  const info = ANIMAL_SCORES[emoji]
+  // 고득점 동물일수록 작고 빠르게
+  const speedFactor = 0.6 + (info.points / 50) * 0.9
+  const sizePenalty = (info.points / 50) * 18
+  const size = 62 + Math.random() * 36 - sizePenalty
   return {
     id: crypto.randomUUID(),
     x: 120 + Math.random() * (GAME_WIDTH - 240),
     y: 120 + Math.random() * (GAME_HEIGHT - 220),
     size,
-    vx: (Math.random() > 0.5 ? 1 : -1) * (0.8 + Math.random() * 1.7),
-    vy: (Math.random() > 0.5 ? 1 : -1) * (0.5 + Math.random() * 1.4),
-    emoji: randomAnimal(),
+    vx: (Math.random() > 0.5 ? 1 : -1) * (0.8 + Math.random() * 1.4) * speedFactor,
+    vy: (Math.random() > 0.5 ? 1 : -1) * (0.5 + Math.random() * 1.1) * speedFactor,
+    emoji,
+    points: info.points,
   }
 }
 
-// 싱글톤 AudioContext — 사용자 제스처(startGame)에서 초기화해야 브라우저 차단 안 됨
-let sharedAudioCtx = null
-
-function ensureAudioContext() {
-  const AudioContextClass = window.AudioContext || window.webkitAudioContext
-  if (!AudioContextClass) return null
-  if (!sharedAudioCtx || sharedAudioCtx.state === 'closed') {
-    sharedAudioCtx = new AudioContextClass()
-  }
-  if (sharedAudioCtx.state === 'suspended') {
-    sharedAudioCtx.resume()
-  }
-  return sharedAudioCtx
-}
-
-function playShotSound() {
-  const ctx = ensureAudioContext()
-  if (!ctx) return
+// 총소리 — ctx를 외부에서 받음
+function playShotSound(ctx) {
+  if (!ctx || ctx.state === 'closed') return
+  if (ctx.state === 'suspended') ctx.resume()
   const now = ctx.currentTime
 
   // 노이즈 버스트 (총소리 핵심)
-  const noiseBuffer = ctx.createBuffer(1, ctx.sampleRate * 0.18, ctx.sampleRate)
+  const dur = 0.22
+  const noiseBuffer = ctx.createBuffer(1, ctx.sampleRate * dur, ctx.sampleRate)
   const output = noiseBuffer.getChannelData(0)
   for (let i = 0; i < output.length; i += 1) {
-    output[i] = (Math.random() * 2 - 1) * (1 - i / output.length) ** 0.6
+    output[i] = (Math.random() * 2 - 1) * (1 - i / output.length) ** 0.5
   }
 
   const noise = ctx.createBufferSource()
   noise.buffer = noiseBuffer
   const bandpass = ctx.createBiquadFilter()
   bandpass.type = 'bandpass'
-  bandpass.frequency.value = 1000
-  bandpass.Q.value = 0.8
+  bandpass.frequency.value = 900
+  bandpass.Q.value = 0.7
   const noiseGain = ctx.createGain()
-  noiseGain.gain.setValueAtTime(0.35, now)
-  noiseGain.gain.exponentialRampToValueAtTime(0.0001, now + 0.16)
+  noiseGain.gain.setValueAtTime(0.6, now)
+  noiseGain.gain.exponentialRampToValueAtTime(0.001, now + dur)
 
   noise.connect(bandpass)
   bandpass.connect(noiseGain)
@@ -69,11 +71,11 @@ function playShotSound() {
   // 저음 펀치 (타격감)
   const osc = ctx.createOscillator()
   osc.type = 'sawtooth'
-  osc.frequency.setValueAtTime(220, now)
-  osc.frequency.exponentialRampToValueAtTime(50, now + 0.15)
+  osc.frequency.setValueAtTime(240, now)
+  osc.frequency.exponentialRampToValueAtTime(40, now + 0.18)
   const oscGain = ctx.createGain()
-  oscGain.gain.setValueAtTime(0.15, now)
-  oscGain.gain.exponentialRampToValueAtTime(0.0001, now + 0.15)
+  oscGain.gain.setValueAtTime(0.3, now)
+  oscGain.gain.exponentialRampToValueAtTime(0.001, now + 0.18)
 
   osc.connect(oscGain)
   oscGain.connect(ctx.destination)
@@ -81,21 +83,21 @@ function playShotSound() {
   // 고음 크랙 (총 특유의 찰칵)
   const crack = ctx.createOscillator()
   crack.type = 'square'
-  crack.frequency.setValueAtTime(800, now)
-  crack.frequency.exponentialRampToValueAtTime(200, now + 0.06)
+  crack.frequency.setValueAtTime(900, now)
+  crack.frequency.exponentialRampToValueAtTime(150, now + 0.08)
   const crackGain = ctx.createGain()
-  crackGain.gain.setValueAtTime(0.1, now)
-  crackGain.gain.exponentialRampToValueAtTime(0.0001, now + 0.06)
+  crackGain.gain.setValueAtTime(0.2, now)
+  crackGain.gain.exponentialRampToValueAtTime(0.001, now + 0.08)
 
   crack.connect(crackGain)
   crackGain.connect(ctx.destination)
 
   noise.start(now)
-  noise.stop(now + 0.18)
+  noise.stop(now + dur)
   osc.start(now)
-  osc.stop(now + 0.15)
+  osc.stop(now + 0.18)
   crack.start(now)
-  crack.stop(now + 0.06)
+  crack.stop(now + 0.08)
 }
 
 function App() {
@@ -103,6 +105,7 @@ function App() {
   const landmarkerRef = useRef(null)
   const animationRef = useRef(null)
   const gameLoopRef = useRef(null)
+  const audioCtxRef = useRef(null)
   const crosshairRef = useRef({ x: GAME_WIDTH / 2, y: GAME_HEIGHT / 2, visible: false })
   const animalsRef = useRef(Array.from({ length: 4 }, spawnAnimal))
   const [cameraReady, setCameraReady] = useState(false)
@@ -245,6 +248,7 @@ function App() {
               x: centerX,
               y: centerY,
               emoji: movedAnimal.emoji,
+              points: movedAnimal.points,
             })
             return spawnAnimal()
           }
@@ -258,9 +262,10 @@ function App() {
       setAnimalsState(nextAnimals)
 
       if (hits.length > 0) {
-        playShotSound()
-        setScore((current) => current + hits.length)
-        setStatusText(`${hits[0].emoji} 사냥 성공! 탕!`)
+        playShotSound(audioCtxRef.current)
+        const earned = hits.reduce((sum, h) => sum + h.points, 0)
+        setScore((current) => current + earned)
+        setStatusText(`${hits[0].emoji} 사냥 성공! +${hits[0].points}점 탕!`)
         setHitBursts((current) => [...current, ...hits])
         window.setTimeout(() => {
           setHitBursts((current) => current.filter((burst) => !hits.some((hit) => hit.id === burst.id)))
@@ -278,8 +283,22 @@ function App() {
   }, [cameraReady, crosshairPos.visible])
 
   const startGame = () => {
-    // 사용자 클릭 이벤트 안에서 AudioContext를 초기화해야 브라우저가 허용
-    ensureAudioContext()
+    // 사용자 클릭 이벤트 안에서 AudioContext 생성 + 무음 재생으로 unlock
+    const AC = window.AudioContext || window.webkitAudioContext
+    if (AC) {
+      if (!audioCtxRef.current || audioCtxRef.current.state === 'closed') {
+        audioCtxRef.current = new AC()
+      }
+      const ctx = audioCtxRef.current
+      if (ctx.state === 'suspended') ctx.resume()
+      // 무음 버퍼를 즉시 재생해서 브라우저 오디오를 완전히 unlock
+      const unlock = ctx.createBuffer(1, 1, ctx.sampleRate)
+      const src = ctx.createBufferSource()
+      src.buffer = unlock
+      src.connect(ctx.destination)
+      src.start()
+    }
+
     const fresh = Array.from({ length: 4 }, spawnAnimal)
     animalsRef.current = fresh
     setScore(0)
@@ -332,6 +351,7 @@ function App() {
                   style={{ left: animal.x, top: animal.y, width: animal.size, height: animal.size }}
                 >
                   <span>{animal.emoji}</span>
+                  <span className="animal-pts">{animal.points}</span>
                 </div>
               ))}
               {hitBursts.map((burst) => (
@@ -341,7 +361,7 @@ function App() {
                   <span className="bubble-ring ring-3" />
                   <span className="bubble-pop">{burst.emoji}</span>
                   <span className="flash">💥</span>
-                  <span className="shot-text">탕!</span>
+                  <span className="shot-text">탕! +{burst.points}</span>
                   {[...Array(8)].map((_, i) => (
                     <span key={i} className="particle" style={{ '--angle': `${i * 45}deg` }} />
                   ))}
@@ -369,11 +389,23 @@ function App() {
           </div>
 
           <div className="info-card">
+            <h2>동물별 점수</h2>
+            <ul className="score-list">
+              {animalKeys.map((emoji) => (
+                <li key={emoji}>
+                  <span>{emoji} {ANIMAL_SCORES[emoji].label}</span>
+                  <strong>{ANIMAL_SCORES[emoji].points}점</strong>
+                </li>
+              ))}
+            </ul>
+          </div>
+
+          <div className="info-card">
             <h2>팁</h2>
             <ul>
               <li>배경이 단순할수록 손 인식이 잘 돼.</li>
               <li>손을 너무 카메라 가까이에 대지 마.</li>
-              <li>휴대폰 카메라로도 브라우저에서 실행 가능해.</li>
+              <li>고득점 동물일수록 작고 빠르니까 집중!</li>
             </ul>
           </div>
 

@@ -22,8 +22,51 @@ function spawnAnimal() {
     vx: (Math.random() > 0.5 ? 1 : -1) * (0.8 + Math.random() * 1.7),
     vy: (Math.random() > 0.5 ? 1 : -1) * (0.5 + Math.random() * 1.4),
     emoji: randomAnimal(),
-    hit: false,
   }
+}
+
+function playShotSound() {
+  const AudioContextClass = window.AudioContext || window.webkitAudioContext
+  if (!AudioContextClass) return
+  const ctx = new AudioContextClass()
+  const now = ctx.currentTime
+
+  const noiseBuffer = ctx.createBuffer(1, ctx.sampleRate * 0.15, ctx.sampleRate)
+  const output = noiseBuffer.getChannelData(0)
+  for (let i = 0; i < output.length; i += 1) {
+    output[i] = (Math.random() * 2 - 1) * (1 - i / output.length)
+  }
+
+  const noise = ctx.createBufferSource()
+  noise.buffer = noiseBuffer
+  const bandpass = ctx.createBiquadFilter()
+  bandpass.type = 'bandpass'
+  bandpass.frequency.value = 1200
+  const gain = ctx.createGain()
+  gain.gain.setValueAtTime(0.18, now)
+  gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.14)
+
+  const osc = ctx.createOscillator()
+  osc.type = 'triangle'
+  osc.frequency.setValueAtTime(190, now)
+  osc.frequency.exponentialRampToValueAtTime(70, now + 0.12)
+  const oscGain = ctx.createGain()
+  oscGain.gain.setValueAtTime(0.08, now)
+  oscGain.gain.exponentialRampToValueAtTime(0.0001, now + 0.12)
+
+  noise.connect(bandpass)
+  bandpass.connect(gain)
+  gain.connect(ctx.destination)
+
+  osc.connect(oscGain)
+  oscGain.connect(ctx.destination)
+
+  noise.start(now)
+  noise.stop(now + 0.15)
+  osc.start(now)
+  osc.stop(now + 0.12)
+
+  setTimeout(() => ctx.close(), 300)
 }
 
 function App() {
@@ -38,6 +81,7 @@ function App() {
   const [running, setRunning] = useState(false)
   const [crosshair, setCrosshair] = useState({ x: GAME_WIDTH / 2, y: GAME_HEIGHT / 2, visible: false })
   const [animalsState, setAnimalsState] = useState(() => Array.from({ length: 4 }, spawnAnimal))
+  const [hitBursts, setHitBursts] = useState([])
   const [statusText, setStatusText] = useState('카메라를 켜고 손 검지를 조준점처럼 움직여봐.')
 
   useEffect(() => {
@@ -130,8 +174,7 @@ function App() {
         return current - 1
       })
 
-      let hitCount = 0
-      let hitEmoji = ''
+      const hits = []
 
       setAnimalsState((currentAnimals) =>
         currentAnimals.map((animal) => {
@@ -155,8 +198,12 @@ function App() {
             const radius = movedAnimal.size * 0.42
 
             if (distance < radius) {
-              hitCount += 1
-              hitEmoji = movedAnimal.emoji
+              hits.push({
+                id: crypto.randomUUID(),
+                x: centerX,
+                y: centerY,
+                emoji: movedAnimal.emoji,
+              })
               return spawnAnimal()
             }
           }
@@ -165,11 +212,16 @@ function App() {
         }),
       )
 
-      if (hitCount > 0) {
-        setScore((current) => current + hitCount)
-        setStatusText(`${hitEmoji} 명중! 계속 조준해봐.`)
+      if (hits.length > 0) {
+        playShotSound()
+        setScore((current) => current + hits.length)
+        setStatusText(`${hits[0].emoji} 사냥 성공! 탕!`)
+        setHitBursts((current) => [...current, ...hits])
+        window.setTimeout(() => {
+          setHitBursts((current) => current.filter((burst) => !hits.some((hit) => hit.id === burst.id)))
+        }, 450)
       }
-    }, 1000)
+    }, 220)
 
     return () => clearInterval(gameLoopRef.current)
   }, [running, crosshair.visible, crosshair.x, crosshair.y])
@@ -184,8 +236,9 @@ function App() {
     setScore(0)
     setTimeLeft(GAME_DURATION)
     setAnimalsState(Array.from({ length: 4 }, spawnAnimal))
+    setHitBursts([])
     setRunning(true)
-    setStatusText('사냥 시작! 동물에 조준점이 닿으면 명중이야.')
+    setStatusText('사냥 시작! 동물에 조준점이 닿으면 탕 하고 사냥돼.')
   }
 
   return (
@@ -196,7 +249,7 @@ function App() {
           <h1>Wild Hand Hunt</h1>
           <p className="lead">
             웹캠 또는 휴대폰 카메라를 켜고 손 검지로 조준해 동물을 사냥하는 미니 게임이야.
-            검지 끝이 조준점이 되고, 동물 위에 정확히 겹치면 화살이 맞은 것으로 처리돼.
+            검지 끝이 조준점이 되고, 동물 위에 정확히 겹치면 총소리와 함께 사냥 성공 처리돼.
           </p>
         </div>
 
@@ -232,6 +285,12 @@ function App() {
                   <span>{animal.emoji}</span>
                 </div>
               ))}
+              {hitBursts.map((burst) => (
+                <div key={burst.id} className="hit-burst" style={{ left: burst.x - 40, top: burst.y - 40 }}>
+                  <span className="flash">💥</span>
+                  <span className="shot-text">탕!</span>
+                </div>
+              ))}
               {crosshair.visible ? (
                 <div className="crosshair" style={{ left: crosshair.x - 28, top: crosshair.y - 28 }}>
                   <div className="ring" />
@@ -249,7 +308,7 @@ function App() {
               <li>브라우저 카메라 권한을 허용해.</li>
               <li>한 손만 화면에 올리고 검지를 펴.</li>
               <li>검지 끝이 조준점이 돼.</li>
-              <li>동물 위에 조준점이 닿으면 명중!</li>
+              <li>동물 위에 조준점이 닿으면 총소리와 함께 명중!</li>
             </ul>
           </div>
 

@@ -1,0 +1,276 @@
+import { useEffect, useMemo, useRef, useState } from 'react'
+import { FilesetResolver, HandLandmarker } from '@mediapipe/tasks-vision'
+import './App.css'
+
+const GAME_WIDTH = 960
+const GAME_HEIGHT = 540
+const GAME_DURATION = 45
+
+const animals = ['🦌', '🐗', '🦊', '🐇', '🦝']
+
+function randomAnimal() {
+  return animals[Math.floor(Math.random() * animals.length)]
+}
+
+function spawnAnimal() {
+  const size = 56 + Math.random() * 42
+  return {
+    id: crypto.randomUUID(),
+    x: 120 + Math.random() * (GAME_WIDTH - 240),
+    y: 120 + Math.random() * (GAME_HEIGHT - 220),
+    size,
+    vx: (Math.random() > 0.5 ? 1 : -1) * (0.8 + Math.random() * 1.7),
+    vy: (Math.random() > 0.5 ? 1 : -1) * (0.5 + Math.random() * 1.4),
+    emoji: randomAnimal(),
+    hit: false,
+  }
+}
+
+function App() {
+  const videoRef = useRef(null)
+  const landmarkerRef = useRef(null)
+  const animationRef = useRef(null)
+  const gameLoopRef = useRef(null)
+  const [cameraReady, setCameraReady] = useState(false)
+  const [permissionError, setPermissionError] = useState('')
+  const [score, setScore] = useState(0)
+  const [timeLeft, setTimeLeft] = useState(GAME_DURATION)
+  const [running, setRunning] = useState(false)
+  const [crosshair, setCrosshair] = useState({ x: GAME_WIDTH / 2, y: GAME_HEIGHT / 2, visible: false })
+  const [animalsState, setAnimalsState] = useState(() => Array.from({ length: 4 }, spawnAnimal))
+  const [statusText, setStatusText] = useState('카메라를 켜고 손 검지를 조준점처럼 움직여봐.')
+
+  useEffect(() => {
+    let mounted = true
+    const videoElement = videoRef.current
+
+    async function setupCameraAndHands() {
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({
+          video: {
+            facingMode: 'user',
+            width: { ideal: 1280 },
+            height: { ideal: 720 },
+          },
+          audio: false,
+        })
+
+        if (!mounted || !videoElement) return
+        videoElement.srcObject = stream
+        await videoElement.play()
+
+        const vision = await FilesetResolver.forVisionTasks(
+          'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@latest/wasm',
+        )
+
+        const handLandmarker = await HandLandmarker.createFromOptions(vision, {
+          baseOptions: {
+            modelAssetPath:
+              'https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task',
+            delegate: 'GPU',
+          },
+          numHands: 1,
+          runningMode: 'VIDEO',
+        })
+
+        landmarkerRef.current = handLandmarker
+        setCameraReady(true)
+        setStatusText('좋아. 손 검지 끝이 조준점이야. 동물 위에 올려서 사냥해.')
+      } catch (error) {
+        setPermissionError(error.message || '카메라를 사용할 수 없어.')
+      }
+    }
+
+    setupCameraAndHands()
+
+    return () => {
+      mounted = false
+      cancelAnimationFrame(animationRef.current)
+      clearInterval(gameLoopRef.current)
+      landmarkerRef.current?.close?.()
+      const stream = videoElement?.srcObject
+      stream?.getTracks?.().forEach((track) => track.stop())
+    }
+  }, [])
+
+  useEffect(() => {
+    if (!cameraReady || !videoRef.current || !landmarkerRef.current) return
+
+    const tick = () => {
+      const video = videoRef.current
+      const results = landmarkerRef.current.detectForVideo(video, performance.now())
+      const landmarks = results?.landmarks?.[0]
+
+      if (landmarks?.[8]) {
+        const indexTip = landmarks[8]
+        const x = (1 - indexTip.x) * GAME_WIDTH
+        const y = indexTip.y * GAME_HEIGHT
+        setCrosshair({ x, y, visible: true })
+      } else {
+        setCrosshair((current) => ({ ...current, visible: false }))
+      }
+
+      animationRef.current = requestAnimationFrame(tick)
+    }
+
+    animationRef.current = requestAnimationFrame(tick)
+    return () => cancelAnimationFrame(animationRef.current)
+  }, [cameraReady])
+
+  useEffect(() => {
+    if (!running) return undefined
+
+    gameLoopRef.current = window.setInterval(() => {
+      setTimeLeft((current) => {
+        if (current <= 1) {
+          setRunning(false)
+          setStatusText('사냥 종료! 다시 시작해서 최고 점수를 노려봐.')
+          return 0
+        }
+        return current - 1
+      })
+
+      let hitCount = 0
+      let hitEmoji = ''
+
+      setAnimalsState((currentAnimals) =>
+        currentAnimals.map((animal) => {
+          let nextX = animal.x + animal.vx * 8
+          let nextY = animal.y + animal.vy * 8
+          let nextVx = animal.vx
+          let nextVy = animal.vy
+
+          if (nextX < 40 || nextX > GAME_WIDTH - 100) nextVx *= -1
+          if (nextY < 50 || nextY > GAME_HEIGHT - 110) nextVy *= -1
+
+          nextX = Math.min(Math.max(nextX, 40), GAME_WIDTH - 100)
+          nextY = Math.min(Math.max(nextY, 50), GAME_HEIGHT - 110)
+
+          const movedAnimal = { ...animal, x: nextX, y: nextY, vx: nextVx, vy: nextVy }
+
+          if (crosshair.visible) {
+            const centerX = movedAnimal.x + movedAnimal.size / 2
+            const centerY = movedAnimal.y + movedAnimal.size / 2
+            const distance = Math.hypot(crosshair.x - centerX, crosshair.y - centerY)
+            const radius = movedAnimal.size * 0.42
+
+            if (distance < radius) {
+              hitCount += 1
+              hitEmoji = movedAnimal.emoji
+              return spawnAnimal()
+            }
+          }
+
+          return movedAnimal
+        }),
+      )
+
+      if (hitCount > 0) {
+        setScore((current) => current + hitCount)
+        setStatusText(`${hitEmoji} 명중! 계속 조준해봐.`)
+      }
+    }, 1000)
+
+    return () => clearInterval(gameLoopRef.current)
+  }, [running, crosshair.visible, crosshair.x, crosshair.y])
+
+  const accuracyHint = useMemo(() => {
+    if (!cameraReady) return '카메라 준비 중'
+    if (!crosshair.visible) return '손이 화면에 안 잡혔어'
+    return '검지 끝으로 동물 위를 천천히 훑어봐'
+  }, [cameraReady, crosshair.visible])
+
+  const startGame = () => {
+    setScore(0)
+    setTimeLeft(GAME_DURATION)
+    setAnimalsState(Array.from({ length: 4 }, spawnAnimal))
+    setRunning(true)
+    setStatusText('사냥 시작! 동물에 조준점이 닿으면 명중이야.')
+  }
+
+  return (
+    <main className="page-shell">
+      <section className="hero-card">
+        <div>
+          <span className="eyebrow">0331 Camera Game</span>
+          <h1>Wild Hand Hunt</h1>
+          <p className="lead">
+            웹캠 또는 휴대폰 카메라를 켜고 손 검지로 조준해 동물을 사냥하는 미니 게임이야.
+            검지 끝이 조준점이 되고, 동물 위에 정확히 겹치면 화살이 맞은 것으로 처리돼.
+          </p>
+        </div>
+
+        <div className="stats-grid">
+          <div className="stat-card accent">
+            <span>점수</span>
+            <strong>{score}</strong>
+          </div>
+          <div className="stat-card">
+            <span>남은 시간</span>
+            <strong>{timeLeft}초</strong>
+          </div>
+          <div className="stat-card">
+            <span>상태</span>
+            <strong>{accuracyHint}</strong>
+          </div>
+        </div>
+      </section>
+
+      {permissionError ? <div className="notice error">카메라 오류: {permissionError}</div> : null}
+
+      <section className="game-layout">
+        <div className="game-panel">
+          <div className="stage-frame" style={{ width: GAME_WIDTH, height: GAME_HEIGHT }}>
+            <video ref={videoRef} className="camera-layer" playsInline muted />
+            <div className="overlay-layer">
+              {animalsState.map((animal) => (
+                <div
+                  key={animal.id}
+                  className="animal"
+                  style={{ left: animal.x, top: animal.y, width: animal.size, height: animal.size }}
+                >
+                  <span>{animal.emoji}</span>
+                </div>
+              ))}
+              {crosshair.visible ? (
+                <div className="crosshair" style={{ left: crosshair.x - 28, top: crosshair.y - 28 }}>
+                  <div className="ring" />
+                  <div className="dot" />
+                </div>
+              ) : null}
+            </div>
+          </div>
+        </div>
+
+        <aside className="side-panel">
+          <div className="info-card">
+            <h2>플레이 방법</h2>
+            <ul>
+              <li>브라우저 카메라 권한을 허용해.</li>
+              <li>한 손만 화면에 올리고 검지를 펴.</li>
+              <li>검지 끝이 조준점이 돼.</li>
+              <li>동물 위에 조준점이 닿으면 명중!</li>
+            </ul>
+          </div>
+
+          <div className="info-card">
+            <h2>팁</h2>
+            <ul>
+              <li>배경이 단순할수록 손 인식이 잘 돼.</li>
+              <li>손을 너무 카메라 가까이에 대지 마.</li>
+              <li>휴대폰 카메라로도 브라우저에서 실행 가능해.</li>
+            </ul>
+          </div>
+
+          <button className="start-button" type="button" onClick={startGame} disabled={!cameraReady}>
+            {running ? '다시 시작' : '사냥 시작'}
+          </button>
+
+          <p className="status-copy">{statusText}</p>
+        </aside>
+      </section>
+    </main>
+  )
+}
+
+export default App

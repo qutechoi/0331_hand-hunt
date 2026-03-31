@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { FilesetResolver, HandLandmarker } from '@mediapipe/tasks-vision'
 import './App.css'
 
@@ -74,12 +74,13 @@ function App() {
   const landmarkerRef = useRef(null)
   const animationRef = useRef(null)
   const gameLoopRef = useRef(null)
+  const crosshairRef = useRef({ x: GAME_WIDTH / 2, y: GAME_HEIGHT / 2, visible: false })
   const [cameraReady, setCameraReady] = useState(false)
   const [permissionError, setPermissionError] = useState('')
   const [score, setScore] = useState(0)
   const [timeLeft, setTimeLeft] = useState(GAME_DURATION)
   const [running, setRunning] = useState(false)
-  const [crosshair, setCrosshair] = useState({ x: GAME_WIDTH / 2, y: GAME_HEIGHT / 2, visible: false })
+  const [crosshairPos, setCrosshairPos] = useState({ x: GAME_WIDTH / 2, y: GAME_HEIGHT / 2, visible: false })
   const [animalsState, setAnimalsState] = useState(() => Array.from({ length: 4 }, spawnAnimal))
   const [hitBursts, setHitBursts] = useState([])
   const [statusText, setStatusText] = useState('카메라를 켜고 손 검지를 조준점처럼 움직여봐.')
@@ -149,9 +150,11 @@ function App() {
         const indexTip = landmarks[8]
         const x = (1 - indexTip.x) * GAME_WIDTH
         const y = indexTip.y * GAME_HEIGHT
-        setCrosshair({ x, y, visible: true })
+        crosshairRef.current = { x, y, visible: true }
+        setCrosshairPos({ x, y, visible: true })
       } else {
-        setCrosshair((current) => ({ ...current, visible: false }))
+        crosshairRef.current = { ...crosshairRef.current, visible: false }
+        setCrosshairPos((current) => ({ ...current, visible: false }))
       }
 
       animationRef.current = requestAnimationFrame(tick)
@@ -161,10 +164,11 @@ function App() {
     return () => cancelAnimationFrame(animationRef.current)
   }, [cameraReady])
 
+  // 1초마다 타이머 감소 (게임 루프와 분리)
   useEffect(() => {
     if (!running) return undefined
 
-    gameLoopRef.current = window.setInterval(() => {
+    const timerId = window.setInterval(() => {
       setTimeLeft((current) => {
         if (current <= 1) {
           setRunning(false)
@@ -173,8 +177,18 @@ function App() {
         }
         return current - 1
       })
+    }, 1000)
 
+    return () => clearInterval(timerId)
+  }, [running])
+
+  // 동물 이동 + 충돌 판정 (crosshairRef 사용으로 재생성 방지)
+  useEffect(() => {
+    if (!running) return undefined
+
+    gameLoopRef.current = window.setInterval(() => {
       const hits = []
+      const ch = crosshairRef.current
 
       setAnimalsState((currentAnimals) =>
         currentAnimals.map((animal) => {
@@ -191,10 +205,10 @@ function App() {
 
           const movedAnimal = { ...animal, x: nextX, y: nextY, vx: nextVx, vy: nextVy }
 
-          if (crosshair.visible) {
+          if (ch.visible) {
             const centerX = movedAnimal.x + movedAnimal.size / 2
             const centerY = movedAnimal.y + movedAnimal.size / 2
-            const distance = Math.hypot(crosshair.x - centerX, crosshair.y - centerY)
+            const distance = Math.hypot(ch.x - centerX, ch.y - centerY)
             const radius = movedAnimal.size * 0.42
 
             if (distance < radius) {
@@ -224,13 +238,13 @@ function App() {
     }, 220)
 
     return () => clearInterval(gameLoopRef.current)
-  }, [running, crosshair.visible, crosshair.x, crosshair.y])
+  }, [running])
 
   const accuracyHint = useMemo(() => {
     if (!cameraReady) return '카메라 준비 중'
-    if (!crosshair.visible) return '손이 화면에 안 잡혔어'
+    if (!crosshairPos.visible) return '손이 화면에 안 잡혔어'
     return '검지 끝으로 동물 위를 천천히 훑어봐'
-  }, [cameraReady, crosshair.visible])
+  }, [cameraReady, crosshairPos.visible])
 
   const startGame = () => {
     setScore(0)
@@ -291,8 +305,8 @@ function App() {
                   <span className="shot-text">탕!</span>
                 </div>
               ))}
-              {crosshair.visible ? (
-                <div className="crosshair" style={{ left: crosshair.x - 28, top: crosshair.y - 28 }}>
+              {crosshairPos.visible ? (
+                <div className="crosshair" style={{ left: crosshairPos.x - 28, top: crosshairPos.y - 28 }}>
                   <div className="ring" />
                   <div className="dot" />
                 </div>

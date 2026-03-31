@@ -81,7 +81,7 @@
   max-width: 100%;
   border-radius: 22px;
   overflow: hidden;
-  background: #1d2538;
+  background: linear-gradient(145deg, #f0f0f0, #e2e2e2);
 }
 
 .camera-layer,
@@ -95,22 +95,22 @@
 .camera-layer {
   object-fit: cover;
   transform: scaleX(-1);
-  filter: saturate(0.92) contrast(1.04);
+  /* 카메라는 손 인식용으로만 사용, 화면에는 숨김 */
+  opacity: 0;
 }
 
 .overlay-layer {
   pointer-events: none;
-  background: radial-gradient(circle at top, rgba(255, 233, 197, 0.08), transparent 32%);
 }
 
 .animal {
   position: absolute;
   display: grid;
   place-items: center;
-  background: rgba(255, 255, 255, 0.16);
-  border: 2px solid rgba(255, 255, 255, 0.32);
+  background: rgba(255, 255, 255, 0.7);
+  border: 2px solid rgba(180, 160, 200, 0.3);
   border-radius: 999px;
-  backdrop-filter: blur(6px);
+  box-shadow: 0 4px 16px rgba(80, 60, 120, 0.12);
 }
 
 .animal span {
@@ -129,6 +129,40 @@
   border-radius: 10px;
   line-height: 1.2;
   box-shadow: 0 2px 6px rgba(255, 100, 50, 0.4);
+}
+
+/* === 게임 화면 HUD === */
+.stage-hud {
+  position: absolute;
+  top: 12px;
+  left: 14px;
+  right: 14px;
+  display: flex;
+  justify-content: space-between;
+  z-index: 10;
+  pointer-events: none;
+}
+
+.hud-score,
+.hud-time {
+  padding: 8px 16px;
+  border-radius: 14px;
+  font-weight: 800;
+  font-size: 1.2rem;
+  backdrop-filter: blur(8px);
+}
+
+.hud-score {
+  background: linear-gradient(135deg, rgba(255, 140, 60, 0.85), rgba(255, 190, 60, 0.85));
+  color: white;
+  text-shadow: 0 1px 4px rgba(180, 80, 0, 0.3);
+  box-shadow: 0 4px 14px rgba(255, 140, 60, 0.3);
+}
+
+.hud-time {
+  background: rgba(255, 255, 255, 0.8);
+  color: #4a4060;
+  box-shadow: 0 4px 14px rgba(80, 60, 120, 0.12);
 }
 
 .crosshair {

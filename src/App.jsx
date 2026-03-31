@@ -344,6 +344,10 @@ function App() {
           <div className="stage-frame" style={{ width: GAME_WIDTH, height: GAME_HEIGHT }}>
             <video ref={videoRef} className="camera-layer" playsInline muted />
             <div className="overlay-layer">
+              <div className="stage-hud">
+                <div className="hud-score">{score}점</div>
+                <div className="hud-time">{timeLeft}초</div>
+              </div>
               {animalsState.map((animal) => (
                 <div
                   key={animal.id}

@@ -104,13 +104,14 @@ function App() {
   const animationRef = useRef(null)
   const gameLoopRef = useRef(null)
   const crosshairRef = useRef({ x: GAME_WIDTH / 2, y: GAME_HEIGHT / 2, visible: false })
+  const animalsRef = useRef(Array.from({ length: 4 }, spawnAnimal))
   const [cameraReady, setCameraReady] = useState(false)
   const [permissionError, setPermissionError] = useState('')
   const [score, setScore] = useState(0)
   const [timeLeft, setTimeLeft] = useState(GAME_DURATION)
   const [running, setRunning] = useState(false)
   const [crosshairPos, setCrosshairPos] = useState({ x: GAME_WIDTH / 2, y: GAME_HEIGHT / 2, visible: false })
-  const [animalsState, setAnimalsState] = useState(() => Array.from({ length: 4 }, spawnAnimal))
+  const [animalsState, setAnimalsState] = useState(() => animalsRef.current)
   const [hitBursts, setHitBursts] = useState([])
   const [statusText, setStatusText] = useState('카메라를 켜고 손 검지를 조준점처럼 움직여봐.')
 
@@ -211,49 +212,50 @@ function App() {
     return () => clearInterval(timerId)
   }, [running])
 
-  // 동물 이동 + 충돌 판정 (crosshairRef 사용으로 재생성 방지)
+  // 동물 이동 + 충돌 판정 — ref에서 직접 읽고 계산 후 state에 반영
   useEffect(() => {
     if (!running) return undefined
 
     gameLoopRef.current = window.setInterval(() => {
-      const hits = []
       const ch = crosshairRef.current
+      const hits = []
+      const nextAnimals = animalsRef.current.map((animal) => {
+        let nextX = animal.x + animal.vx * 8
+        let nextY = animal.y + animal.vy * 8
+        let nextVx = animal.vx
+        let nextVy = animal.vy
 
-      setAnimalsState((currentAnimals) =>
-        currentAnimals.map((animal) => {
-          let nextX = animal.x + animal.vx * 8
-          let nextY = animal.y + animal.vy * 8
-          let nextVx = animal.vx
-          let nextVy = animal.vy
+        if (nextX < 40 || nextX > GAME_WIDTH - 100) nextVx *= -1
+        if (nextY < 50 || nextY > GAME_HEIGHT - 110) nextVy *= -1
 
-          if (nextX < 40 || nextX > GAME_WIDTH - 100) nextVx *= -1
-          if (nextY < 50 || nextY > GAME_HEIGHT - 110) nextVy *= -1
+        nextX = Math.min(Math.max(nextX, 40), GAME_WIDTH - 100)
+        nextY = Math.min(Math.max(nextY, 50), GAME_HEIGHT - 110)
 
-          nextX = Math.min(Math.max(nextX, 40), GAME_WIDTH - 100)
-          nextY = Math.min(Math.max(nextY, 50), GAME_HEIGHT - 110)
+        const movedAnimal = { ...animal, x: nextX, y: nextY, vx: nextVx, vy: nextVy }
 
-          const movedAnimal = { ...animal, x: nextX, y: nextY, vx: nextVx, vy: nextVy }
+        if (ch.visible) {
+          const centerX = movedAnimal.x + movedAnimal.size / 2
+          const centerY = movedAnimal.y + movedAnimal.size / 2
+          const distance = Math.hypot(ch.x - centerX, ch.y - centerY)
+          const radius = movedAnimal.size * 0.42
 
-          if (ch.visible) {
-            const centerX = movedAnimal.x + movedAnimal.size / 2
-            const centerY = movedAnimal.y + movedAnimal.size / 2
-            const distance = Math.hypot(ch.x - centerX, ch.y - centerY)
-            const radius = movedAnimal.size * 0.42
-
-            if (distance < radius) {
-              hits.push({
-                id: crypto.randomUUID(),
-                x: centerX,
-                y: centerY,
-                emoji: movedAnimal.emoji,
-              })
-              return spawnAnimal()
-            }
+          if (distance < radius) {
+            hits.push({
+              id: crypto.randomUUID(),
+              x: centerX,
+              y: centerY,
+              emoji: movedAnimal.emoji,
+            })
+            return spawnAnimal()
           }
+        }
 
-          return movedAnimal
-        }),
-      )
+        return movedAnimal
+      })
+
+      // ref와 state 동시에 갱신
+      animalsRef.current = nextAnimals
+      setAnimalsState(nextAnimals)
 
       if (hits.length > 0) {
         playShotSound()
@@ -278,9 +280,11 @@ function App() {
   const startGame = () => {
     // 사용자 클릭 이벤트 안에서 AudioContext를 초기화해야 브라우저가 허용
     ensureAudioContext()
+    const fresh = Array.from({ length: 4 }, spawnAnimal)
+    animalsRef.current = fresh
     setScore(0)
     setTimeLeft(GAME_DURATION)
-    setAnimalsState(Array.from({ length: 4 }, spawnAnimal))
+    setAnimalsState(fresh)
     setHitBursts([])
     setRunning(true)
     setStatusText('사냥 시작! 동물에 조준점이 닿으면 탕 하고 사냥돼.')

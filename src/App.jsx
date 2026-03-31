@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { FilesetResolver, HandLandmarker } from '@mediapipe/tasks-vision'
+import { FilesetResolver, HandLandmarker, ImageSegmenter } from '@mediapipe/tasks-vision'
 import './App.css'
 
 const GAME_WIDTH = 960
@@ -102,7 +102,10 @@ function playShotSound(ctx) {
 
 function App() {
   const videoRef = useRef(null)
+  const canvasRef = useRef(null)
+  const offCanvasRef = useRef(null)
   const landmarkerRef = useRef(null)
+  const segmenterRef = useRef(null)
   const animationRef = useRef(null)
   const gameLoopRef = useRef(null)
   const audioCtxRef = useRef(null)
@@ -152,6 +155,19 @@ function App() {
         })
 
         landmarkerRef.current = handLandmarker
+
+        const segmenter = await ImageSegmenter.createFromOptions(vision, {
+          baseOptions: {
+            modelAssetPath:
+              'https://storage.googleapis.com/mediapipe-models/image_segmenter/selfie_segmenter/float16/latest/selfie_segmenter.tflite',
+            delegate: 'GPU',
+          },
+          runningMode: 'VIDEO',
+          outputCategoryMask: false,
+          outputConfidenceMask: true,
+        })
+        segmenterRef.current = segmenter
+
         setCameraReady(true)
         setStatusText('좋아. 손 검지 끝이 조준점이야. 동물 위에 올려서 사냥해.')
       } catch (error) {
@@ -166,6 +182,7 @@ function App() {
       cancelAnimationFrame(animationRef.current)
       clearInterval(gameLoopRef.current)
       landmarkerRef.current?.close?.()
+      segmenterRef.current?.close?.()
       const stream = videoElement?.srcObject
       stream?.getTracks?.().forEach((track) => track.stop())
     }
@@ -174,9 +191,15 @@ function App() {
   useEffect(() => {
     if (!cameraReady || !videoRef.current || !landmarkerRef.current) return
 
+    const BG_R = 235, BG_G = 235, BG_B = 235
+
     const tick = () => {
       const video = videoRef.current
-      const results = landmarkerRef.current.detectForVideo(video, performance.now())
+      const canvas = canvasRef.current
+      const now = performance.now()
+
+      // 손 감지
+      const results = landmarkerRef.current.detectForVideo(video, now)
       const landmarks = results?.landmarks?.[0]
 
       if (landmarks?.[8]) {
@@ -188,6 +211,55 @@ function App() {
       } else {
         crosshairRef.current = { ...crosshairRef.current, visible: false }
         setCrosshairPos((current) => ({ ...current, visible: false }))
+      }
+
+      // 배경 제거 + 캔버스 렌더링
+      if (segmenterRef.current && canvas && video.videoWidth > 0) {
+        const vw = video.videoWidth
+        const vh = video.videoHeight
+
+        if (canvas.width !== vw || canvas.height !== vh) {
+          canvas.width = vw
+          canvas.height = vh
+        }
+
+        // 오프스크린 캔버스 (픽셀 조작용)
+        if (!offCanvasRef.current) {
+          offCanvasRef.current = document.createElement('canvas')
+        }
+        const off = offCanvasRef.current
+        if (off.width !== vw || off.height !== vh) {
+          off.width = vw
+          off.height = vh
+        }
+
+        const offCtx = off.getContext('2d', { willReadFrequently: true })
+        offCtx.drawImage(video, 0, 0, vw, vh)
+
+        const segResult = segmenterRef.current.segmentForVideo(video, now)
+        if (segResult.confidenceMasks?.length > 0) {
+          const maskData = segResult.confidenceMasks[0].getAsFloat32Array()
+          const imageData = offCtx.getImageData(0, 0, vw, vh)
+          const px = imageData.data
+
+          for (let i = 0; i < maskData.length; i++) {
+            const conf = maskData[i]
+            if (conf < 0.65) {
+              // 배경 → 단색으로 교체 (가장자리 부드럽게)
+              const blend = Math.max(conf / 0.65, 0)
+              const j = i * 4
+              px[j]     = Math.round(px[j] * blend + BG_R * (1 - blend))
+              px[j + 1] = Math.round(px[j + 1] * blend + BG_G * (1 - blend))
+              px[j + 2] = Math.round(px[j + 2] * blend + BG_B * (1 - blend))
+            }
+          }
+
+          offCtx.putImageData(imageData, 0, 0)
+          segResult.confidenceMasks[0].close()
+        }
+
+        const ctx2d = canvas.getContext('2d')
+        ctx2d.drawImage(off, 0, 0)
       }
 
       animationRef.current = requestAnimationFrame(tick)
@@ -343,6 +415,7 @@ function App() {
         <div className="game-panel">
           <div className="stage-frame" style={{ width: GAME_WIDTH, height: GAME_HEIGHT }}>
             <video ref={videoRef} className="camera-layer" playsInline muted />
+            <canvas ref={canvasRef} className="segmented-layer" />
             <div className="overlay-layer">
               <div className="stage-hud">
                 <div className="hud-score">{score}점</div>

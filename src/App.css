@@ -94,9 +94,20 @@
 
 .camera-layer {
   object-fit: cover;
-  transform: scaleX(-1);
-  /* 카메라는 손 인식용으로만 사용, 화면에는 숨김 */
+  /* 카메라는 MediaPipe 입력용, 화면에는 숨김 */
   opacity: 0;
+  pointer-events: none;
+}
+
+.segmented-layer {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  transform: scaleX(-1);
+  border-radius: 22px;
 }
 
 .overlay-layer {

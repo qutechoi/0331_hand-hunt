@@ -25,48 +25,77 @@ function spawnAnimal() {
   }
 }
 
-function playShotSound() {
+// 싱글톤 AudioContext — 사용자 제스처(startGame)에서 초기화해야 브라우저 차단 안 됨
+let sharedAudioCtx = null
+
+function ensureAudioContext() {
   const AudioContextClass = window.AudioContext || window.webkitAudioContext
-  if (!AudioContextClass) return
-  const ctx = new AudioContextClass()
+  if (!AudioContextClass) return null
+  if (!sharedAudioCtx || sharedAudioCtx.state === 'closed') {
+    sharedAudioCtx = new AudioContextClass()
+  }
+  if (sharedAudioCtx.state === 'suspended') {
+    sharedAudioCtx.resume()
+  }
+  return sharedAudioCtx
+}
+
+function playShotSound() {
+  const ctx = ensureAudioContext()
+  if (!ctx) return
   const now = ctx.currentTime
 
-  const noiseBuffer = ctx.createBuffer(1, ctx.sampleRate * 0.15, ctx.sampleRate)
+  // 노이즈 버스트 (총소리 핵심)
+  const noiseBuffer = ctx.createBuffer(1, ctx.sampleRate * 0.18, ctx.sampleRate)
   const output = noiseBuffer.getChannelData(0)
   for (let i = 0; i < output.length; i += 1) {
-    output[i] = (Math.random() * 2 - 1) * (1 - i / output.length)
+    output[i] = (Math.random() * 2 - 1) * (1 - i / output.length) ** 0.6
   }
 
   const noise = ctx.createBufferSource()
   noise.buffer = noiseBuffer
   const bandpass = ctx.createBiquadFilter()
   bandpass.type = 'bandpass'
-  bandpass.frequency.value = 1200
-  const gain = ctx.createGain()
-  gain.gain.setValueAtTime(0.18, now)
-  gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.14)
-
-  const osc = ctx.createOscillator()
-  osc.type = 'triangle'
-  osc.frequency.setValueAtTime(190, now)
-  osc.frequency.exponentialRampToValueAtTime(70, now + 0.12)
-  const oscGain = ctx.createGain()
-  oscGain.gain.setValueAtTime(0.08, now)
-  oscGain.gain.exponentialRampToValueAtTime(0.0001, now + 0.12)
+  bandpass.frequency.value = 1000
+  bandpass.Q.value = 0.8
+  const noiseGain = ctx.createGain()
+  noiseGain.gain.setValueAtTime(0.35, now)
+  noiseGain.gain.exponentialRampToValueAtTime(0.0001, now + 0.16)
 
   noise.connect(bandpass)
-  bandpass.connect(gain)
-  gain.connect(ctx.destination)
+  bandpass.connect(noiseGain)
+  noiseGain.connect(ctx.destination)
+
+  // 저음 펀치 (타격감)
+  const osc = ctx.createOscillator()
+  osc.type = 'sawtooth'
+  osc.frequency.setValueAtTime(220, now)
+  osc.frequency.exponentialRampToValueAtTime(50, now + 0.15)
+  const oscGain = ctx.createGain()
+  oscGain.gain.setValueAtTime(0.15, now)
+  oscGain.gain.exponentialRampToValueAtTime(0.0001, now + 0.15)
 
   osc.connect(oscGain)
   oscGain.connect(ctx.destination)
 
-  noise.start(now)
-  noise.stop(now + 0.15)
-  osc.start(now)
-  osc.stop(now + 0.12)
+  // 고음 크랙 (총 특유의 찰칵)
+  const crack = ctx.createOscillator()
+  crack.type = 'square'
+  crack.frequency.setValueAtTime(800, now)
+  crack.frequency.exponentialRampToValueAtTime(200, now + 0.06)
+  const crackGain = ctx.createGain()
+  crackGain.gain.setValueAtTime(0.1, now)
+  crackGain.gain.exponentialRampToValueAtTime(0.0001, now + 0.06)
 
-  setTimeout(() => ctx.close(), 300)
+  crack.connect(crackGain)
+  crackGain.connect(ctx.destination)
+
+  noise.start(now)
+  noise.stop(now + 0.18)
+  osc.start(now)
+  osc.stop(now + 0.15)
+  crack.start(now)
+  crack.stop(now + 0.06)
 }
 
 function App() {
@@ -233,7 +262,7 @@ function App() {
         setHitBursts((current) => [...current, ...hits])
         window.setTimeout(() => {
           setHitBursts((current) => current.filter((burst) => !hits.some((hit) => hit.id === burst.id)))
-        }, 450)
+        }, 700)
       }
     }, 220)
 
@@ -247,6 +276,8 @@ function App() {
   }, [cameraReady, crosshairPos.visible])
 
   const startGame = () => {
+    // 사용자 클릭 이벤트 안에서 AudioContext를 초기화해야 브라우저가 허용
+    ensureAudioContext()
     setScore(0)
     setTimeLeft(GAME_DURATION)
     setAnimalsState(Array.from({ length: 4 }, spawnAnimal))
@@ -300,9 +331,16 @@ function App() {
                 </div>
               ))}
               {hitBursts.map((burst) => (
-                <div key={burst.id} className="hit-burst" style={{ left: burst.x - 40, top: burst.y - 40 }}>
+                <div key={burst.id} className="hit-burst" style={{ left: burst.x, top: burst.y }}>
+                  <span className="bubble-ring ring-1" />
+                  <span className="bubble-ring ring-2" />
+                  <span className="bubble-ring ring-3" />
+                  <span className="bubble-pop">{burst.emoji}</span>
                   <span className="flash">💥</span>
                   <span className="shot-text">탕!</span>
+                  {[...Array(8)].map((_, i) => (
+                    <span key={i} className="particle" style={{ '--angle': `${i * 45}deg` }} />
+                  ))}
                 </div>
               ))}
               {crosshairPos.visible ? (
